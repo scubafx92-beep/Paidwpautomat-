@@ -6,10 +6,10 @@ const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = requi
 const fs = require('fs');
 const express = require('express');
 
-// 🔗 DUMMY WEB SERVER FOR RENDER PORT BINDING (Iske bina Render deploy fail kar deta hai)
+// 🔗 WEB SERVER FOR RENDER
 const app = express();
 const PORT = process.env.PORT || 3000;
-app.get('/', (req, res) => res.send('System status: Active 🚀'));
+app.get('/', (req, res) => res.send('System Status: 24/7 Active Pro 🚀'));
 app.listen(PORT, () => console.log(`[+] Server running on port ${PORT}`));
 
 // 🔑 CONFIGURATION
@@ -17,7 +17,6 @@ const BOT_TOKEN = '8722740855:AAHMyWM_iHLSTD5i-D6x8GJZhhbQWazrWMI';
 const ADMIN_CHAT_ID = '8457670186'; 
 const SELLER_USERNAME = '@vanshfx1';  
 
-// 🤖 TELEGRAM BOT WITH ULTRA-HIGH TIMEOUT LIMIT
 const tgBot = new Telegraf(BOT_TOKEN, {
     handlerTimeout: 90000, 
     telegram: { apiKeyMode: 'strict' }
@@ -27,7 +26,7 @@ let sock = null;
 let isConnected = false;
 let isInitializing = false;
 
-// 📁 DATABASE SETUP (Premium users access storage)
+// 📁 DATABASE SETUP
 const DB_FILE = 'paid_users.json';
 let paidUsers = {};
 if (fs.existsSync(DB_FILE)) {
@@ -45,7 +44,7 @@ function checkAccess(ctx) {
     return false;
 }
 
-// 🤖 WHATSAPP INSTANCE ENGINE
+// 🤖 ULTIMATE AUTO-RECONNECT WHATSAPP ENGINE
 async function connectToWhatsApp() {
     if (isInitializing) return;
     isInitializing = true;
@@ -55,9 +54,10 @@ async function connectToWhatsApp() {
         sock = makeWASocket({ 
             auth: state, 
             printQRInTerminal: false,
-            keepAliveIntervalMs: 30000,
-            connectTimeoutMs: 60000,
-            defaultQueryTimeoutMs: 0
+            keepAliveIntervalMs: 15000, // Background activity lock
+            connectTimeoutMs: 120000,
+            defaultQueryTimeoutMs: 0,
+            retryRequestOptions: { maxRetries: 5, delayMinMs: 2000 }
         });
 
         sock.ev.on('connection.update', async (update) => {
@@ -65,14 +65,19 @@ async function connectToWhatsApp() {
             if (connection === 'open') {
                 isConnected = true;
                 isInitializing = false;
-                sendTelegramMessage(ADMIN_CHAT_ID, '✅ <b>WhatsApp successfully connected!</b>\n\nAb aap message list bhej sakte hain.');
+                console.log('[+] WhatsApp Online.');
             }
             if (connection === 'close') {
                 isConnected = false;
                 isInitializing = false;
                 const statusCode = (lastDisconnect.error)?.output?.statusCode;
+                
+                // Pure automatic loop backend crash bypass
                 if (statusCode !== DisconnectReason.loggedOut) {
-                    setTimeout(connectToWhatsApp, 5000);
+                    console.log('[-] Connection closed by Render. Re-validating session instantly...');
+                    setTimeout(connectToWhatsApp, 2000); // 2 second me auto-reconnect
+                } else {
+                    sendTelegramMessage(ADMIN_CHAT_ID, '❌ WhatsApp Session Expired! Dobara /link karein.');
                 }
             }
         });
@@ -82,23 +87,22 @@ async function connectToWhatsApp() {
     }
 }
 
-// 📡 JAM-PROOF TELEGRAM MESSAGE SENDER
 async function sendTelegramMessage(chatId, text) {
     try {
         await tgBot.telegram.sendMessage(chatId, text, { parse_mode: 'HTML' });
     } catch (err) {
-        console.log('TG Send Error');
+        console.log('TG Error');
     }
 }
 
-// 📡 TELEGRAM BOT COMMANDS
+// 📡 TELEGRAM COMMANDS
 tgBot.command('start', (ctx) => {
     const userId = ctx.chat.id.toString();
     if (userId === ADMIN_CHAT_ID) {
-        return ctx.reply(`👋 Welcome Back Boss!\n\nLink karne ke liye:\n<code>/link 91XXXXXXXXXX</code>`, { parse_mode: 'HTML' });
+        return ctx.reply(`👋 Welcome Back Boss!\n\nLink: <code>/link 91XXXXXXXXXX</code>`, { parse_mode: 'HTML' });
     }
     if (checkAccess(ctx)) {
-        return ctx.reply('✅ <b>Aapka VIP access active hai!</b>\n\nFormat:\n<code>/send message text | number1,number2</code>', { parse_mode: 'HTML' });
+        return ctx.reply('✅ VIP Active! /send msg | numbers', { parse_mode: 'HTML' });
     } else {
         return ctx.reply(`❌ Access Denied. Contact: ${SELLER_USERNAME}`, { parse_mode: 'HTML' });
     }
@@ -118,57 +122,73 @@ tgBot.command('link', async (ctx) => {
     let text = ctx.message.text.replace('/link', '').trim();
     if (!text) return ctx.reply('❌ Number dalo!');
 
-    if (!sock) {
-        ctx.reply('⏳ Engine start kiya ja raha hai, 5 second baad fir se command bhejein...');
+    // Force link even if sock is dead
+    if (!sock || !isConnected) {
         await connectToWhatsApp();
-        return;
+        await new Promise(r => setTimeout(r, 4000));
     }
 
     try {
         let code = await sock.requestPairingCode(text);
-        ctx.reply(`✅ <b>WhatsApp Pairing Code:</b>\n\n👉 <code>${code}</code>\n\nIs code ko copy karke WhatsApp me dalo!`, { parse_mode: 'HTML' });
+        ctx.reply(`✅ <b>WhatsApp Pairing Code:</b>\n\n👉 <code>${code}</code>`, { parse_mode: 'HTML' });
     } catch (err) { 
-        ctx.reply('❌ Link Error: ' + err.message); 
+        ctx.reply('❌ Link Error: ' + err.message + '\nDobara try karein.'); 
+        isInitializing = false;
+        connectToWhatsApp();
     }
 });
 
-// 🔥 COMPLETE FIXED SEND COMMAND (Bina crash wala smooth system)
+// 🔥 ANTI-FREEZE BULK SENDER LOOP
 tgBot.command('send', async (ctx) => {
     if (!checkAccess(ctx)) return ctx.reply(`❌ Premium Feature Only!`);
-    if (!isConnected) return ctx.reply('❌ WhatsApp Offline hai! Admin ko bolo re-link/start karein.');
+    
+    // Auto-wake up engine if sleeping before campaign
+    if (!isConnected || !sock) {
+        await ctx.reply('⏳ Engine offline dikha raha tha, hosh me laaya ja raha hai... 5 second wait karein...');
+        await connectToWhatsApp();
+        await new Promise(r => setTimeout(r, 5000));
+    }
 
     let input = ctx.message.text.replace('/send', '').trim();
-    if (!input.includes('|')) return ctx.reply('❌ Sahi format: /send message | number1,number2');
+    if (!input.includes('|')) return ctx.reply('❌ Format: /send msg | num1,num2');
 
     let parts = input.split('|');
-    let messageText = parts[0].trim(); // 👈 Pehla part text message h
+    let messageText = parts[0].trim();
     let rawNumbers = parts[1] ? parts[1].trim() : ''; 
     
-    if (!rawNumbers) return ctx.reply('❌ Numbers ki list nahi mili!');
-    
-    // Numbers ko filter karke array me badalna (safai ke sath)
+    if (!rawNumbers) return ctx.reply('❌ Numbers nahi mile!');
     let numbersList = rawNumbers.split(',').map(num => num.trim()).filter(num => num.length > 0);
 
-    ctx.reply(`🚀 Campaign Started! Total ${numbersList.length} numbers par 30-30 seconds ke gap me message bheja ja raha hai...`);
+    ctx.reply(`🚀 Campaign Started! Total ${numbersList.length} numbers par 30-30 seconds ke gap me message ja raha hai...`);
 
     for (let i = 0; i < numbersList.length; i++) {
         let num = numbersList[i];
+        
+        // Loop ke andar agar Render connection drop kare toh instant fix backup
+        if (!sock) {
+            await connectToWhatsApp();
+            await new Promise(r => setTimeout(r, 3000));
+        }
+
         try {
             await sock.sendMessage(num + "@s.whatsapp.net", { text: messageText });
-            await ctx.reply(`[+] Delivered to ${num} - DONE ✅`);
-            
-            // ⏳ Agar list me aage aur number hain, toh exact 30 seconds rukega
-            if (i < numbersList.length - 1) {
-                await new Promise(r => setTimeout(r, 30000)); 
-            }
+            await ctx.reply(`[+] Delivered to ${num} ✅`);
+            if (i < numbersList.length - 1) await new Promise(r => setTimeout(r, 30000)); 
         } catch (e) { 
-            await ctx.reply(`[!] ${num} par fail hua ❌`); 
+            // Retry block if packet fails due to background sleep
+            try {
+                await new Promise(r => setTimeout(r, 2000));
+                await sock.sendMessage(num + "@s.whatsapp.net", { text: messageText });
+                await ctx.reply(`[+] Delivered on Retry to ${num} ✅`);
+                if (i < numbersList.length - 1) await new Promise(r => setTimeout(r, 30000));
+            } catch(err) {
+                await ctx.reply(`[!] ${num} Fail ❌`); 
+            }
         }
     }
     ctx.reply('🏁 Campaign Finished!');
 });
 
-// 🔥 CRASH-PROOF BOT LAUNCH
 async function startBot() {
     try {
         await tgBot.launch();
