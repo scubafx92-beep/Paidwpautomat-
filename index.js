@@ -6,7 +6,7 @@ const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = requi
 const fs = require('fs');
 const express = require('express');
 
-// 🔗 WEB SERVER FOR RENDER PORT BINDING (Fixes Deploy Crash)
+// 🔗 WEB SERVER FOR RENDER PORT BINDING (Iske bina Render deploy nahi hone deta)
 const app = express();
 const PORT = process.env.PORT || 3000;
 app.get('/', (req, res) => res.send('Bot is running flawlessly on Render! 🚀'));
@@ -46,29 +46,33 @@ function checkAccess(ctx) {
 
 // 🤖 WHATSAPP INSTANCE ENGINE
 async function connectToWhatsApp() {
-    const { state, saveCreds } = await useMultiFileAuthState('auth_info_nexus');
-    sock = makeWASocket({ auth: state, printQRInTerminal: false });
+    try {
+        const { state, saveCreds } = await useMultiFileAuthState('auth_info_nexus');
+        sock = makeWASocket({ auth: state, printQRInTerminal: false });
 
-    sock.ev.on('connection.update', async (update) => {
-        const { connection, lastDisconnect, qr } = update;
-        if (qr) {
-            console.log('[*] WhatsApp QR generated.');
-            sendTelegramMessage(ADMIN_CHAT_ID, `⚠️ <b>WhatsApp Not Linked!</b>\n\nLink karne ke liye reply me type karein:\n<code>/link 91XXXXXXXXXX</code>`);
-        }
-        if (connection === 'open') {
-            isConnected = true;
-            console.log('[+] WhatsApp Online.');
-            sendTelegramMessage(ADMIN_CHAT_ID, '✅ <b>WhatsApp successfully connected to Render Cloud!</b>\n\nAb paid users campaign chala sakte hain.');
-        }
-        if (connection === 'close') {
-            isConnected = false;
-            if ((lastDisconnect.error)?.output?.statusCode !== DisconnectReason.loggedOut) {
-                console.log('[-] Reconnecting WhatsApp...');
-                connectToWhatsApp();
+        sock.ev.on('connection.update', async (update) => {
+            const { connection, lastDisconnect, qr } = update;
+            if (qr) {
+                console.log('[*] WhatsApp QR/Pairing ready.');
             }
-        }
-    });
-    sock.ev.on('creds.update', saveCreds);
+            if (connection === 'open') {
+                isConnected = true;
+                console.log('[+] WhatsApp Online.');
+                sendTelegramMessage(ADMIN_CHAT_ID, '✅ <b>WhatsApp successfully connected to Render Cloud!</b>\n\nAb paid users campaign chala sakte hain.');
+            }
+            if (connection === 'close') {
+                isConnected = false;
+                const shouldReconnect = (lastDisconnect.error)?.output?.statusCode !== DisconnectReason.loggedOut;
+                if (shouldReconnect) {
+                    console.log('[-] Reconnecting WhatsApp...');
+                    setTimeout(connectToWhatsApp, 5000);
+                }
+            }
+        });
+        sock.ev.on('creds.update', saveCreds);
+    } catch (error) {
+        console.log("WhatsApp init error:", error.message);
+    }
 }
 
 // 📡 JAM-PROOF TELEGRAM MESSAGE SENDER
@@ -112,13 +116,17 @@ tgBot.command('link', async (ctx) => {
     let text = ctx.message.text.replace('/link', '').trim();
     if (!text) return ctx.reply('❌ Number dalo! Ex: /link 917217604544');
 
-    if (!sock) return ctx.reply('❌ WhatsApp engine initialize ho raha hai, thoda wait karke try karein.');
+    if (!sock) {
+        return ctx.reply('⚠️ Engine abhi initialization process me hai. Kripya 10 second baad dobara <code>/link ' + text + '</code> try karein.');
+    }
 
     ctx.reply('⏳ Requesting 8-digit code from WhatsApp server...');
     try {
         let code = await sock.requestPairingCode(text);
         ctx.reply(`✅ <b>WhatsApp Pairing Code:</b>\n\n👉 <code>${code}</code>\n\nIs code ko copy karke WhatsApp me dalo!`, { parse_mode: 'HTML' });
-    } catch (err) { ctx.reply('❌ Link Error: ' + err.message); }
+    } catch (err) { 
+        ctx.reply('❌ Link Error: ' + err.message + '\n\nTip: Agar baar-baar error aaye toh project folder se auth_info_nexus folder delete karke restart karein.'); 
+    }
 });
 
 tgBot.command('send', async (ctx) => {
@@ -132,7 +140,7 @@ tgBot.command('send', async (ctx) => {
     let messageText = parts[0].trim();
     let numbersList = parts[1].split(',');
 
-    ctx.reply(`🚀 Campaign Started! Total ${numbersList.length} numbers par message bheja ja raha hai (Har message me 30 sec ka gap hoga)...`);
+    ctx.reply(`🚀 Campaign Started! Total ${numbersList.length} numbers par 30-30 seconds ke gap me message bheja ja raha hai...`);
 
     for (let i = 0; i < numbersList.length; i++) {
         let num = numbersList[i].trim();
@@ -142,7 +150,7 @@ tgBot.command('send', async (ctx) => {
             await sock.sendMessage(num + "@s.whatsapp.net", { text: messageText });
             await ctx.reply(`[+] Delivered to ${num} - DONE ✅`);
             
-            // ⏳ 30 seconds fix delay if there are more numbers left
+            // ⏳ Exact 30 seconds fix delay if there are more numbers left in list
             if (i < numbersList.length - 1) {
                 await new Promise(r => setTimeout(r, 30000)); 
             }
@@ -166,4 +174,3 @@ async function startBot() {
 }
 
 startBot();
-                    
