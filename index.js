@@ -6,10 +6,10 @@ const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = requi
 const fs = require('fs');
 const express = require('express');
 
-// 🔗 WEB SERVER FOR RENDER PORT BINDING (Iske bina Render deploy nahi hone deta)
+// 🔗 WEB SERVER FOR RENDER PORT BINDING
 const app = express();
 const PORT = process.env.PORT || 3000;
-app.get('/', (req, res) => res.send('Bot is running flawlessly on Render! 🚀'));
+app.get('/', (req, res) => res.send('Bot Engine is Active! 🚀'));
 app.listen(PORT, () => console.log(`[+] Express Server listening on port ${PORT}`));
 
 // 🔑 CONFIGURATION
@@ -25,6 +25,7 @@ const tgBot = new Telegraf(BOT_TOKEN, {
 
 let sock = null;
 let isConnected = false;
+let isInitializing = false;
 
 // 📁 DATABASE SETUP
 const DB_FILE = 'paid_users.json';
@@ -44,9 +45,12 @@ function checkAccess(ctx) {
     return false;
 }
 
-// 🤖 WHATSAPP INSTANCE ENGINE
+// 🤖 WHATSAPP INSTANCE ENGINE (Optimized)
 async function connectToWhatsApp() {
+    if (isInitializing) return;
+    isInitializing = true;
     try {
+        console.log('[*] Initializing WhatsApp Engine...');
         const { state, saveCreds } = await useMultiFileAuthState('auth_info_nexus');
         sock = makeWASocket({ auth: state, printQRInTerminal: false });
 
@@ -57,11 +61,13 @@ async function connectToWhatsApp() {
             }
             if (connection === 'open') {
                 isConnected = true;
+                isInitializing = false;
                 console.log('[+] WhatsApp Online.');
-                sendTelegramMessage(ADMIN_CHAT_ID, '✅ <b>WhatsApp successfully connected to Render Cloud!</b>\n\nAb paid users campaign chala sakte hain.');
+                sendTelegramMessage(ADMIN_CHAT_ID, '✅ <b>WhatsApp successfully connected to Render!</b>\n\nAb campaign chala sakte hain.');
             }
             if (connection === 'close') {
                 isConnected = false;
+                isInitializing = false;
                 const shouldReconnect = (lastDisconnect.error)?.output?.statusCode !== DisconnectReason.loggedOut;
                 if (shouldReconnect) {
                     console.log('[-] Reconnecting WhatsApp...');
@@ -71,6 +77,7 @@ async function connectToWhatsApp() {
         });
         sock.ev.on('creds.update', saveCreds);
     } catch (error) {
+        isInitializing = false;
         console.log("WhatsApp init error:", error.message);
     }
 }
@@ -80,9 +87,8 @@ async function sendTelegramMessage(chatId, text) {
     try {
         await tgBot.telegram.sendMessage(chatId, text, { parse_mode: 'HTML' });
     } catch (err) {
-        console.log('[!] Telegram Network Jam. Retrying connection in 5s...');
         setTimeout(() => {
-            tgBot.telegram.sendMessage(chatId, text, { parse_mode: 'HTML' }).catch(e => console.log('Final Fail:', e.message));
+            tgBot.telegram.sendMessage(chatId, text, { parse_mode: 'HTML' }).catch(e => console.log('Fail:', e.message));
         }, 5000); 
     }
 }
@@ -96,7 +102,7 @@ tgBot.command('start', (ctx) => {
     if (checkAccess(ctx)) {
         return ctx.reply('✅ <b>Aapka VIP access active hai!</b>\n\nFormat:\n<code>/send message text | number1,number2</code>', { parse_mode: 'HTML' });
     } else {
-        return ctx.reply(`❌ <b>Access Denied! Premium Bot Only.</b>\n\nये एक प्रीमियम बल्क व्हाट्सएप मैसेंजर बोट है। इसे 1 महीने के लिए अनलॉक कराने और इसका पूरा फायदा उठाने के लिए मेरे DM में आओ।\n\n👉 <b>Meri ID hai:</b> ${SELLER_USERNAME}\n\n⚠️ <i>Note: Pay karne ke baad mujhe apni ye ID send karein: <code>${userId}</code></i>`, { parse_mode: 'HTML' });
+        return ctx.reply(`❌ <b>Access Denied! Premium Bot Only.</b>\n\nDM karo unlock ke liye: ${SELLER_USERNAME}\n\n⚠️ ID send karein: <code>${userId}</code>`, { parse_mode: 'HTML' });
     }
 });
 
@@ -108,16 +114,20 @@ tgBot.command('approve', (ctx) => {
     paidUsers[targetUser] = { expiry: Date.now() + (30 * 24 * 60 * 60 * 1000), approvedAt: Date.now() };
     saveDatabase();
     ctx.reply(`✅ User ${targetUser} 30 Days ke liye unlock ho gaya!`);
-    sendTelegramMessage(targetUser, '🎉 <b>Access Unlocked!</b>\n\nOwner ne aapka access 1 mahine ke liye khol diya hai. Ab aap bulk send kar sakte hain:\n<code>/send message | number1,number2</code>');
+    sendTelegramMessage(targetUser, '🎉 <b>Access Unlocked!</b>\n\nAb aap bulk send kar sakte hain:\n<code>/send message | number1,number2</code>');
 });
 
+// 🔥 JAM-PROOF LINK COMMAND WITH AUTOMATIC FORCE START
 tgBot.command('link', async (ctx) => {
     if (ctx.chat.id.toString() !== ADMIN_CHAT_ID) return;
     let text = ctx.message.text.replace('/link', '').trim();
     if (!text) return ctx.reply('❌ Number dalo! Ex: /link 917217604544');
 
+    // 🔄 Force start if engine is missing
     if (!sock) {
-        return ctx.reply('⚠️ Engine abhi initialization process me hai. Kripya 10 second baad dobara <code>/link ' + text + '</code> try karein.');
+        ctx.reply('⏳ Engine sleeping mode me thha. Main use force start kar raha hu... Please 5 second wait karke dobara command bhejein.');
+        await connectToWhatsApp();
+        return;
     }
 
     ctx.reply('⏳ Requesting 8-digit code from WhatsApp server...');
@@ -125,7 +135,9 @@ tgBot.command('link', async (ctx) => {
         let code = await sock.requestPairingCode(text);
         ctx.reply(`✅ <b>WhatsApp Pairing Code:</b>\n\n👉 <code>${code}</code>\n\nIs code ko copy karke WhatsApp me dalo!`, { parse_mode: 'HTML' });
     } catch (err) { 
-        ctx.reply('❌ Link Error: ' + err.message + '\n\nTip: Agar baar-baar error aaye toh project folder se auth_info_nexus folder delete karke restart karein.'); 
+        ctx.reply('❌ Link Error: ' + err.message + '\n\nTip: Agar baar-baar error aaye toh project se auth_info_nexus folder delete karke re-deploy karein.'); 
+        // Crash mitigation
+        sock = null;
     }
 });
 
@@ -150,7 +162,7 @@ tgBot.command('send', async (ctx) => {
             await sock.sendMessage(num + "@s.whatsapp.net", { text: messageText });
             await ctx.reply(`[+] Delivered to ${num} - DONE ✅`);
             
-            // ⏳ Exact 30 seconds fix delay if there are more numbers left in list
+            // ⏳ Exact 30 seconds fix delay
             if (i < numbersList.length - 1) {
                 await new Promise(r => setTimeout(r, 30000)); 
             }
@@ -168,7 +180,7 @@ async function startBot() {
         console.log('[+] TELEGRAM PREMIUM CONTROL BOT CORE ACTIVE');
         await connectToWhatsApp();
     } catch (err) {
-        console.log('[!] Bot launch failed due to network jam, auto-restarting in 10s...');
+        console.log('[!] Bot launch failed, auto-restarting in 10s...');
         setTimeout(startBot, 10000); 
     }
 }
